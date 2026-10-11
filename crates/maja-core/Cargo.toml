@@ -1,0 +1,13 @@
+[package]
+name = "maja-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[[bin]]
+name = "maja-core"
+path = "src/main.rs"
+

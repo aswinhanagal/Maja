@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3c7182"/>
+      <stop offset="1" stop-color="#183e52"/>
+    </linearGradient>
+    <linearGradient id="mask" x1="0" y1="0" x2=".85" y2="1">
+      <stop offset="0" stop-color="#e9c995"/>
+      <stop offset="1" stop-color="#c99b62"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f0d7ab"/>
+      <stop offset="1" stop-color="#d4ad79"/>
+    </linearGradient>
+    <clipPath id="tile"><rect x="24" y="24" width="976" height="976" rx="218"/></clipPath>
+    <clipPath id="face"><path d="M257 252 Q257 224 286 224 H738 Q767 224 767 253 L767 508 Q767 733 627 840 Q569 884 512 884 Q455 884 397 840 Q257 733 257 508 Z"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="1024" height="1024" fill="url(#bg)"/>
+    <circle cx="512" cy="470" r="380" fill="#ffffff" opacity=".035"/>
+    <path d="M0 790 Q280 690 512 802 Q750 918 1024 770 V1024 H0Z" fill="#102f40" opacity=".25"/>
+    <path d="M257 270 Q257 242 286 242 H738 Q767 242 767 271 L767 526 Q767 751 627 858 Q569 902 512 902 Q455 902 397 858 Q257 751 257 526 Z" fill="#102f40" opacity=".38"/>
+    <g>
+      <!-- The perfectly level crown gives the face its distinctive cropped-mask silhouette. -->
+      <path d="M257 252 Q257 224 286 224 H738 Q767 224 767 253 L767 508 Q767 733 627 840 Q569 884 512 884 Q455 884 397 840 Q257 733 257 508 Z" fill="url(#mask)"/>
+      <g clip-path="url(#face)">
+        <path d="M512 214 H790 V910 H512Z" fill="#bd8e59" opacity=".24"/>
+        <path d="M512 224 V882" stroke="#f5dfba" stroke-width="5" opacity=".3"/>
+      </g>
+      <!-- calm, gently lifted brows and open almond eyes -->
+      <path d="M325 414 Q391 365 458 407" fill="none" stroke="#805e43" stroke-width="18" stroke-linecap="round"/>
+      <path d="M566 407 Q633 365 699 414" fill="none" stroke="#805e43" stroke-width="18" stroke-linecap="round"/>
+      <path d="M326 466 Q390 421 458 466 Q393 508 326 466Z" fill="#f8f0df"/>
+      <path d="M566 466 Q634 421 698 466 Q631 508 566 466Z" fill="#f8f0df"/>
+      <ellipse cx="393" cy="466" rx="17" ry="24" fill="#384b4a"/>
+      <ellipse cx="631" cy="466" rx="17" ry="24" fill="#384b4a"/>
+      <circle cx="399" cy="457" r="5" fill="#fff" opacity=".85"/>
+      <circle cx="637" cy="457" r="5" fill="#fff" opacity=".85"/>
+      <path d="M512 486 Q495 553 489 583 Q511 601 536 583" fill="none" stroke="#a9784e" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M420 685 Q512 770 604 685" fill="none" stroke="#895e45" stroke-width="17" stroke-linecap="round"/>
+      <path d="M441 690 Q512 735 583 690" fill="none" stroke="#f2d9ad" stroke-width="7" stroke-linecap="round" opacity=".8"/>
+      <path d="M303 567 Q323 608 345 625" fill="none" stroke="#f4ddb7" stroke-width="10" stroke-linecap="round" opacity=".55"/>
+      <path d="M721 567 Q701 608 679 625" fill="none" stroke="#a9784e" stroke-width="10" stroke-linecap="round" opacity=".5"/>
+    </g>
+    <rect x="24" y="24" width="976" height="976" rx="218" fill="none" stroke="#ffffff" stroke-opacity=".14" stroke-width="3"/>
+  </g>
+</svg>

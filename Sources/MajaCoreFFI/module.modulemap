@@ -1,0 +1,5 @@
+module MajaCoreFFI [system] {
+    header "maja_core.h"
+    link "maja_core"
+    export *
+}
