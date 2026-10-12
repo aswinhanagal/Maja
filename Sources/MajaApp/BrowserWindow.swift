@@ -394,11 +394,13 @@ private struct BrowserPane: View {
                 ForEach(model.visibleEntries) { entry in
                     VStack(spacing: 7) {
                         FileIcon(path: entry.path, size: model.viewMode == .icons ? 48 * model.iconScale : 24, isFolder: entry.isDirectory)
+                            .onTapGesture(count: 2) { model.open(entry) }
                         if model.renamingPath == entry.path {
                             InlineRenameField(model: model)
                         } else {
                             Text(entry.name).font(.system(size: 12 * model.iconScale)).lineLimit(model.viewMode == .icons ? 2 : 1)
                                 .multilineTextAlignment(.center)
+                                .onTapGesture(count: 2) { model.open(entry) }
                         }
                     }
                     .frame(maxWidth: .infinity, minHeight: model.viewMode == .icons ? 90 * model.iconScale : 40)
