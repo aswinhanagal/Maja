@@ -1,15 +1,7 @@
 import SwiftUI
-import AppKit
 
 @main
 struct MajaApp: App {
-    init() {
-        if let iconURL = Bundle.main.url(forResource: "Maja", withExtension: "icns"),
-           let icon = NSImage(contentsOf: iconURL) {
-            NSApplication.shared.applicationIconImage = icon
-        }
-    }
-
     var body: some Scene {
         WindowGroup("Maja", id: "browser") {
             BrowserWindow(model: BrowserModel())
@@ -19,6 +11,11 @@ struct MajaApp: App {
 
         Window("About Maja", id: "about") {
             AboutView()
+        }
+        .windowResizability(.contentSize)
+
+        Window("Maja Preferences", id: "preferences") {
+            PreferencesView()
         }
         .windowResizability(.contentSize)
     }

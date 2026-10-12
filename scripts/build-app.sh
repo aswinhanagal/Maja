@@ -37,8 +37,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Maja</string>
 <key>CFBundleDisplayName</key><string>Maja</string>
 <key>CFBundleIdentifier</key><string>dev.maja.filemanager</string>
-<key>CFBundleVersion</key><string>0.1.0</string>
-<key>CFBundleShortVersionString</key><string>0.1</string>
+<key>CFBundleVersion</key><string>0.1.1</string>
+<key>CFBundleShortVersionString</key><string>0.1.1</string>
 <key>CFBundleExecutable</key><string>Maja</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>

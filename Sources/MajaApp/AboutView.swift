@@ -1,6 +1,31 @@
 import AppKit
 import SwiftUI
 
+struct PreferencesView: View {
+    @AppStorage("maja.showHiddenFiles") private var showHiddenFiles = false
+    @AppStorage("maja.viewMode") private var defaultView = "List"
+    @AppStorage("maja.sortMode") private var sortMode = "Name"
+    @AppStorage("maja.sortAscending") private var sortAscending = true
+
+    var body: some View {
+        Form {
+            Section("When opening a folder") {
+                Picker("Default view", selection: $defaultView) {
+                    ForEach(ViewMode.allCases) { mode in Text(mode.rawValue).tag(mode.rawValue) }
+                }
+                Picker("Sort by", selection: $sortMode) {
+                    ForEach(SortMode.allCases) { mode in Text(mode.rawValue).tag(mode.rawValue) }
+                }
+                Toggle("Sort in ascending order", isOn: $sortAscending)
+                Toggle("Show hidden files", isOn: $showHiddenFiles)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(20)
+        .frame(width: 390)
+    }
+}
+
 private enum AboutPage: String, CaseIterable, Identifiable {
     case about = "About"
     case credits = "Credits"
@@ -55,7 +80,7 @@ struct AboutView: View {
                 .padding(.bottom, 2)
 
             Text("Maja").font(.title2.weight(.semibold))
-            Text("0.1").foregroundStyle(.secondary)
+            Text("0.1.1").foregroundStyle(.secondary)
             Text("A native macOS file manager inspired by Caja.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)

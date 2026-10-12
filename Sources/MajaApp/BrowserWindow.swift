@@ -83,31 +83,36 @@ private struct BrowserPane: View {
     @State private var locationText = ""
     @State private var isEditingLocation = false
     @State private var showSidebar = true
+    @State private var showMainToolbar = true
+    @State private var showLocationBar = true
+    @State private var showStatusBar = true
     @State private var propertiesPath: String?
     @FocusState private var locationFieldFocused: Bool
+    @FocusState private var searchFieldFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
+            if showMainToolbar || showLocationBar { toolbar }
             Divider()
             HSplitView {
                 if showSidebar {
                     PlacesSidebar(model: model)
-                        .frame(minWidth: 170, idealWidth: 210, maxWidth: 280)
+                        .frame(minWidth: 126, idealWidth: 210, maxWidth: 210)
                 }
                 content
                     .frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
             }
             Divider()
-            HStack(spacing: 6) {
-                Text("\(model.visibleEntries.count) items")
-                if let selected = model.selectedEntry { Text("• \(selected.name) selected") }
-                Spacer()
-                Text(model.currentURL.path).lineLimit(1).truncationMode(.middle)
+            if showStatusBar {
+                HStack(spacing: 6) {
+                    Text(statusSummary)
+                    Spacer()
+                    Text(model.currentURL.path).lineLimit(1).truncationMode(.middle)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12).padding(.vertical, 6)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12).padding(.vertical, 6)
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: Binding(get: { propertiesPath != nil }, set: { if !$0 { propertiesPath = nil } })) {
@@ -136,17 +141,77 @@ private struct BrowserPane: View {
             copy: { model.copySelectedToClipboard() },
             cut: { model.copySelectedToClipboard(cut: true) },
             paste: model.pasteClipboard,
-            hasSelection: model.selectedEntry != nil,
+            hasSelection: !model.selectedEntryIDs.isEmpty,
+            hasSingleSelection: model.selectedEntryIDs.count == 1,
+            selectAll: model.selectAll,
+            selectPattern: model.selectPattern,
+            clearHistory: model.clearHistory,
+            connectToServer: model.requestConnectToServer,
+            properties: { propertiesPath = model.currentURL.path },
+            emptyTrash: model.emptyTrash,
+            hasTrashItems: model.hasTrashItems,
+            toggleSidebar: { showSidebar.toggle() },
+            toggleMainToolbar: { showMainToolbar.toggle() },
+            toggleLocationBar: { showLocationBar.toggle() },
+            toggleStatusBar: { showStatusBar.toggle() },
+            sidebarShown: showSidebar,
+            mainToolbarShown: showMainToolbar,
+            locationBarShown: showLocationBar,
+            statusBarShown: showStatusBar,
+            resetView: {
+                model.resetZoom()
+                model.viewMode = .icons
+                model.sortMode = .name
+                model.sortAscending = true
+                model.showHiddenFiles = false
+                showSidebar = true
+                showMainToolbar = true
+                showLocationBar = true
+                showStatusBar = true
+            },
             addBookmark: model.addCurrentBookmark,
             newTab: newTab,
             closeTab: closeTab,
-            openFolder: model.openFolderPicker
+            openFolder: model.openFolderPicker,
+            createEmptyFile: { model.createNewDocument(asTextFile: false) },
+            createTextFile: { model.createNewDocument(asTextFile: true) },
+            zoomIn: model.zoomIn,
+            zoomOut: model.zoomOut,
+            resetZoom: model.resetZoom,
+            makeLink: model.makeLinkSelected,
+            computer: { model.navigate(to: URL(fileURLWithPath: "/")) },
+            templates: { model.navigate(to: FileManager.default.homeDirectoryForCurrentUser.appending(path: "Templates")) },
+            trashFolder: { model.navigate(to: URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".Trash")) },
+            editLocation: { isEditingLocation = true; locationFieldFocused = true },
+            focusSearch: { searchFieldFocused = true }
         ))
+    }
+
+    private var statusSummary: String {
+        let selection = model.selectedEntries
+        if !selection.isEmpty {
+            let files = selection.filter { !$0.isDirectory }
+            let folders = selection.filter(\.isDirectory).count
+            let size = files.reduce(UInt64(0)) { $0 + $1.size }
+            var details = ["\(selection.count) selected"]
+            if !files.isEmpty {
+                details.append("\(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)) in \(files.count) files")
+            }
+            if folders > 0 { details.append("\(folders) folders") }
+            return details.joined(separator: " · ")
+        }
+
+        let attributes = try? FileManager.default.attributesOfFileSystem(forPath: model.currentURL.path)
+        if let free = attributes?[.systemFreeSize] as? NSNumber {
+            return "\(model.visibleEntries.count) items · Free space: \(ByteCountFormatter.string(fromByteCount: free.int64Value, countStyle: .file))"
+        }
+        return "\(model.visibleEntries.count) items"
     }
 
     private var toolbar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            if showMainToolbar {
+              HStack(spacing: 10) {
                 Button { model.goBack() } label: { Image(systemName: "chevron.left") }
                     .disabled(!model.canGoBack).help("Back")
                 Button { model.goForward() } label: { Image(systemName: "chevron.right") }
@@ -177,10 +242,12 @@ private struct BrowserPane: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().frame(width: 132)
             }
-            .buttonStyle(.borderless)
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            Divider()
-            HStack(spacing: 5) {
+              .buttonStyle(.borderless)
+              .padding(.horizontal, 12).padding(.vertical, 7)
+              Divider()
+            }
+            if showLocationBar {
+              HStack(spacing: 5) {
                 if isEditingLocation {
                     Image(systemName: "folder").foregroundStyle(.secondary)
                     TextField("Location", text: $locationText)
@@ -206,6 +273,7 @@ private struct BrowserPane: View {
                     .buttonStyle(.borderless).help(isEditingLocation ? "Done Editing Location" : "Edit Location")
             }
             .padding(.horizontal, 12).padding(.vertical, 6)
+            }
         }
         .alert("New Folder", isPresented: $model.isShowingNewFolder) {
             TextField("Name", text: $model.newFolderName)
@@ -242,6 +310,7 @@ private struct BrowserPane: View {
                 Spacer()
                 TextField("Search this folder", text: $model.searchText)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 230)
+                    .focused($searchFieldFocused)
                     .onChange(of: model.searchText) { _, query in model.updateSearch(query) }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -271,29 +340,43 @@ private struct BrowserPane: View {
 
     private var listView: some View {
         Table(model.visibleEntries, selection: Binding(
-            get: { model.selectedEntry?.id },
-            set: { id in model.selectedEntry = model.visibleEntries.first { $0.id == id } }
+            get: { model.selectedEntryIDs },
+            set: { model.selectedEntryIDs = $0 }
         )) {
             TableColumn("Name") { entry in
                 HStack(spacing: 8) {
-                    FileIcon(path: entry.path, size: 18)
+                    FileIcon(path: entry.path, size: 18, isFolder: entry.isDirectory)
                     if model.renamingPath == entry.path {
                         InlineRenameField(model: model)
                     } else {
-                        Text(entry.name).lineLimit(1)
+                        Text(entry.name)
+                            .lineLimit(1)
+                            .onTapGesture(count: 2) { model.open(entry) }
+                            .simultaneousGesture(TapGesture().onEnded {
+                                model.select(entry, extend: NSEvent.modifierFlags.contains(.command))
+                            })
                     }
                 }
                 .draggable(URL(fileURLWithPath: entry.path))
                 .dropDestination(for: URL.self) { urls, _ in model.acceptDrop(urls, on: entry) }
-                .contentShape(Rectangle())
-                .onTapGesture(count: 2) { model.open(entry) }
             }
             .width(min: 180, ideal: 300)
-            TableColumn("Size") { entry in Text(entry.isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: Int64(entry.size), countStyle: .file)).foregroundStyle(.secondary) }
+            TableColumn("Size") { entry in
+                Text(entry.isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: Int64(entry.size), countStyle: .file))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        model.select(entry, extend: NSEvent.modifierFlags.contains(.command))
+                    })
+            }
                 .width(min: 70, ideal: 90)
             TableColumn("Modified") { entry in
                 Text(Date(timeIntervalSince1970: TimeInterval(entry.modified)), format: .dateTime.month(.abbreviated).day().hour().minute())
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        model.select(entry, extend: NSEvent.modifierFlags.contains(.command))
+                    })
             }.width(min: 130, ideal: 150)
         }
         .contextMenu(forSelectionType: String.self) { ids in
@@ -310,7 +393,7 @@ private struct BrowserPane: View {
             LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
                 ForEach(model.visibleEntries) { entry in
                     VStack(spacing: 7) {
-                        FileIcon(path: entry.path, size: model.viewMode == .icons ? 48 * model.iconScale : 24)
+                        FileIcon(path: entry.path, size: model.viewMode == .icons ? 48 * model.iconScale : 24, isFolder: entry.isDirectory)
                         if model.renamingPath == entry.path {
                             InlineRenameField(model: model)
                         } else {
@@ -320,10 +403,10 @@ private struct BrowserPane: View {
                     }
                     .frame(maxWidth: .infinity, minHeight: model.viewMode == .icons ? 90 * model.iconScale : 40)
                     .padding(6)
-                    .background(model.selectedEntry == entry ? Color.accentColor.opacity(0.13) : .clear,
+                    .background(model.selectedEntryIDs.contains(entry.id) ? Color.accentColor.opacity(0.13) : .clear,
                                 in: RoundedRectangle(cornerRadius: 7))
                     .contentShape(Rectangle())
-                    .onTapGesture { model.selectedEntry = entry }
+                    .onTapGesture { model.select(entry, extend: NSEvent.modifierFlags.contains(.command)) }
                     .onTapGesture(count: 2) { model.open(entry) }
                     .draggable(URL(fileURLWithPath: entry.path))
                     .dropDestination(for: URL.self) { urls, _ in model.acceptDrop(urls, on: entry) }
@@ -364,7 +447,7 @@ private struct BrowserPane: View {
 
     private func compactRow(_ entry: FileEntry, width: CGFloat) -> some View {
         HStack(spacing: 6) {
-            FileIcon(path: entry.path, size: 20 * model.iconScale)
+            FileIcon(path: entry.path, size: 20 * model.iconScale, isFolder: entry.isDirectory)
             if model.renamingPath == entry.path {
                 InlineRenameField(model: model)
             } else {
@@ -377,10 +460,10 @@ private struct BrowserPane: View {
         }
         .padding(.horizontal, 4)
         .frame(width: width, height: max(27, 27 * model.iconScale), alignment: .leading)
-        .background(model.selectedEntry == entry ? Color.accentColor.opacity(0.18) : .clear,
+        .background(model.selectedEntryIDs.contains(entry.id) ? Color.accentColor.opacity(0.18) : .clear,
                     in: RoundedRectangle(cornerRadius: 4))
         .contentShape(Rectangle())
-        .onTapGesture { model.selectedEntry = entry }
+        .onTapGesture { model.select(entry, extend: NSEvent.modifierFlags.contains(.command)) }
         .onTapGesture(count: 2) { model.open(entry) }
         .draggable(URL(fileURLWithPath: entry.path))
         .dropDestination(for: URL.self) { urls, _ in model.acceptDrop(urls, on: entry) }
@@ -462,12 +545,18 @@ private struct BrowserPane: View {
 private struct FileIcon: View {
     let path: String
     let size: CGFloat
+    var isFolder = false
+    @State private var isHovered = false
 
     var body: some View {
         Image(nsImage: NSWorkspace.shared.icon(forFile: path))
             .resizable()
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
+            .brightness(isFolder && isHovered ? 0.12 : 0)
+            .scaleEffect(isFolder && isHovered ? 1.045 : 1)
+            .animation(.easeOut(duration: 0.14), value: isHovered)
+            .onHover { isHovered = $0 }
             .accessibilityHidden(true)
     }
 }
@@ -495,6 +584,10 @@ private struct InlineRenameField: View {
 private struct FilePropertiesView: View {
     let path: String
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedTab = 0
+    @State private var contentsSummary: String?
+    @State private var permissionMode = 0
+    @State private var permissionError: String?
 
     private var url: URL { URL(fileURLWithPath: path) }
     private var attributes: [FileAttributeKey: Any] { (try? FileManager.default.attributesOfItem(atPath: path)) ?? [:] }
@@ -509,37 +602,149 @@ private struct FilePropertiesView: View {
         guard let bytes = attributes[.size] as? NSNumber else { return "—" }
         return ByteCountFormatter.string(fromByteCount: bytes.int64Value, countStyle: .file)
     }
+    private var volumeInfo: [FileAttributeKey: Any] {
+        (try? FileManager.default.attributesOfFileSystem(forPath: path)) ?? [:]
+    }
+    private var volumeName: String {
+        let values = try? url.resourceValues(forKeys: [.volumeNameKey])
+        return values?.volumeName ?? url.deletingLastPathComponent().path
+    }
+    private var freeSpace: String {
+        guard let bytes = volumeInfo[.systemFreeSize] as? NSNumber else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: bytes.int64Value, countStyle: .file)
+    }
     private func date(_ key: FileAttributeKey) -> String {
         guard let value = attributes[key] as? Date else { return "—" }
         return value.formatted(date: .long, time: .shortened)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
+        VStack(spacing: 0) {
+            Picker("Properties", selection: $selectedTab) {
+                Text("Basic").tag(0)
+                Text("Permissions").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding([.horizontal, .top], 18)
+
+            Group {
+                if selectedTab == 0 { basicTab } else { permissionsTab }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(20)
+
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
+        }
+        .frame(width: 520, height: isDirectory ? 430 : 360)
+        .task(id: path) {
+            permissionMode = (attributes[.posixPermissions] as? NSNumber)?.intValue ?? 0
+            guard isDirectory else { return }
+            let folder = url
+            contentsSummary = await Task.detached(priority: .utility) {
+                Self.summarizeContents(of: folder)
+            }.value
+        }
+    }
+
+    private var basicTab: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 14) {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: path))
-                    .resizable().aspectRatio(contentMode: .fit).frame(width: 48, height: 48)
-                VStack(alignment: .leading, spacing: 3) {
+                    .resizable().aspectRatio(contentMode: .fit).frame(width: 56, height: 56)
+                VStack(alignment: .leading, spacing: 4) {
                     Text(url.lastPathComponent).font(.title3.weight(.semibold)).lineLimit(1)
                     Text(kind).foregroundStyle(.secondary)
                 }
             }
             Divider()
-            propertyRow("Where", url.deletingLastPathComponent().path)
-            propertyRow("Size", size)
+            if isDirectory {
+                propertyRow("Contents", contentsSummary ?? "Calculating…")
+                propertyRow("Location", url.deletingLastPathComponent().path)
+                propertyRow("Volume", volumeName)
+                propertyRow("Free space", freeSpace)
+            } else {
+                propertyRow("Location", url.deletingLastPathComponent().path)
+                propertyRow("Size", size)
+            }
             propertyRow("Created", date(.creationDate))
             propertyRow("Modified", date(.modificationDate))
-            if let permissions = attributes[.posixPermissions] as? NSNumber {
-                propertyRow("Permissions", String(format: "%04o", permissions.intValue))
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var permissionsTab: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Permissions for this folder").font(.headline)
+            Text("Changes apply to this folder only.")
+                .font(.callout).foregroundStyle(.secondary)
+            Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 12) {
+                GridRow {
+                    Text("")
+                    Text("Read").foregroundStyle(.secondary)
+                    Text("Write").foregroundStyle(.secondary)
+                    Text("Execute").foregroundStyle(.secondary)
+                }
+                permissionRow("Owner", read: 0o400, write: 0o200, execute: 0o100)
+                permissionRow("Group", read: 0o040, write: 0o020, execute: 0o010)
+                permissionRow("Everyone", read: 0o004, write: 0o002, execute: 0o001)
+            }
+            Divider()
+            propertyRow("Owner", attributes[.ownerAccountName] as? String ?? "—")
+            propertyRow("Group", attributes[.groupOwnerAccountName] as? String ?? "—")
+            propertyRow("Modified", date(.modificationDate))
+            if let permissionError {
+                Text(permissionError).font(.callout).foregroundStyle(.red)
             }
             Spacer(minLength: 0)
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+        }
+    }
+
+    private func permissionRow(_ title: String, read: Int, write: Int, execute: Int) -> some View {
+        GridRow {
+            Text(title).frame(minWidth: 74, alignment: .leading)
+            permissionToggle("Read", bit: read)
+            permissionToggle("Write", bit: write)
+            permissionToggle("Execute", bit: execute)
+        }
+    }
+
+    private func permissionToggle(_ label: String, bit: Int) -> some View {
+        Toggle(label, isOn: Binding(
+            get: { permissionMode & bit != 0 },
+            set: { enabled in
+                let updated = enabled ? permissionMode | bit : permissionMode & ~bit
+                do {
+                    try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: updated)], ofItemAtPath: path)
+                    permissionMode = updated
+                    permissionError = nil
+                } catch {
+                    permissionError = error.localizedDescription
+                }
+            }
+        ))
+        .labelsHidden()
+        .accessibilityLabel(label)
+    }
+
+    nonisolated private static func summarizeContents(of url: URL) -> String {
+        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey], options: [.skipsHiddenFiles]) else {
+            return "Unable to read contents"
+        }
+        var count = 0
+        var bytes: Int64 = 0
+        for case let item as URL in enumerator {
+            count += 1
+            if let values = try? item.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey]), values.isDirectory != true {
+                bytes += Int64(values.fileSize ?? 0)
             }
         }
-        .padding(22)
-        .frame(width: 440, height: 330)
+        let countText = "\(count) item\(count == 1 ? "" : "s")"
+        return count == 0 ? "nothing" : "\(countText), \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file))"
     }
 
     private func propertyRow(_ label: String, _ value: String) -> some View {
@@ -568,9 +773,16 @@ private struct PlacesSidebar: View {
             if !model.bookmarks.isEmpty {
                 Section("Bookmarks") {
                     ForEach(model.bookmarks) { bookmark in
-                        Label(bookmark.name, systemImage: "bookmark")
-                            .contentShape(Rectangle())
-                            .onTapGesture { model.navigate(to: bookmark.url) }
+                        Button { model.navigate(to: bookmark.url) } label: {
+                            Label(bookmark.name, systemImage: "bookmark")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8).padding(.vertical, 6)
+                                .background(isCurrent(bookmark.url) ? Color.accentColor.opacity(0.16) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 7))
+                                .contentShape(Rectangle())
+                                .fontWeight(isCurrent(bookmark.url) ? .bold : .regular)
+                        }
+                        .buttonStyle(.plain)
                             .contextMenu {
                                 Button("Remove Bookmark") { model.removeBookmark(bookmark) }
                             }
@@ -598,9 +810,20 @@ private struct PlacesSidebar: View {
     }
 
     private func place(_ title: String, icon: String, url: URL) -> some View {
-        Label(title, systemImage: icon)
-            .contentShape(Rectangle())
-            .onTapGesture { model.navigate(to: url) }
-            .foregroundStyle(model.currentURL == url.standardizedFileURL ? Color.accentColor : Color.primary)
+        Button { model.navigate(to: url) } label: {
+            Label(title, systemImage: icon)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .background(isCurrent(url) ? Color.accentColor.opacity(0.16) : .clear,
+                            in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
+                .fontWeight(isCurrent(url) ? .bold : .regular)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.primary)
+    }
+
+    private func isCurrent(_ url: URL) -> Bool {
+        model.currentURL.standardizedFileURL.path == url.standardizedFileURL.path
     }
 }

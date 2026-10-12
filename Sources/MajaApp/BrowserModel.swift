@@ -32,7 +32,14 @@ struct Bookmark: Codable, Identifiable, Hashable, Sendable {
 final class BrowserModel {
     var currentURL: URL
     var entries: [FileEntry] = []
-    var selectedEntry: FileEntry?
+    var selectedEntryIDs: Set<String> = []
+    var selectedEntry: FileEntry? {
+        get { selectedEntries.first }
+        set { selectedEntryIDs = newValue.map { [$0.id] } ?? [] }
+    }
+    var selectedEntries: [FileEntry] {
+        visibleEntries.filter { selectedEntryIDs.contains($0.id) }
+    }
     var errorMessage: String?
     var operationError: String?
     var isShowingNewFolder = false
@@ -62,6 +69,7 @@ final class BrowserModel {
     var bookmarks: [Bookmark] = []
     var searchResults: [FileEntry]?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var lastOpenedFolder: (path: String, time: Date)?
 
     init(at url: URL = FileManager.default.homeDirectoryForCurrentUser) {
         currentURL = url
@@ -101,7 +109,7 @@ final class BrowserModel {
             forwardStack.removeAll()
         }
         currentURL = url.standardizedFileURL
-        selectedEntry = nil
+        selectedEntryIDs.removeAll()
         searchTask?.cancel()
         isSearching = false
         searchText = ""
@@ -174,7 +182,13 @@ final class BrowserModel {
     }
 
     func open(_ entry: FileEntry) {
-        if entry.isDirectory { navigate(to: URL(fileURLWithPath: entry.path)) }
+        if entry.isDirectory {
+            let now = Date()
+            if let lastOpenedFolder, lastOpenedFolder.path == entry.path,
+               now.timeIntervalSince(lastOpenedFolder.time) < 0.35 { return }
+            lastOpenedFolder = (entry.path, now)
+            navigate(to: URL(fileURLWithPath: entry.path))
+        }
         else {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -240,25 +254,99 @@ final class BrowserModel {
     }
 
     func renameSelected(to name: String) {
-        guard let path = renamingPath ?? selectedEntry?.path else { return }
+        guard let path = renamingPath ?? (selectedEntries.count == 1 ? selectedEntry?.path : nil) else { return }
         renameItem(at: path, to: name)
     }
 
+    func selectAll() { selectedEntryIDs = Set(visibleEntries.map(\.id)) }
+
+    func select(_ entry: FileEntry, extend: Bool = false) {
+        if extend {
+            if selectedEntryIDs.contains(entry.id) { selectedEntryIDs.remove(entry.id) }
+            else { selectedEntryIDs.insert(entry.id) }
+        } else { selectedEntryIDs = [entry.id] }
+    }
+
+    func selectPattern() {
+        let alert = NSAlert()
+        alert.messageText = "Select Items by Pattern"
+        alert.informativeText = "Use * for any number of characters and ? for a single character."
+        let input = NSTextField(string: "*")
+        input.frame = NSRect(x: 0, y: 0, width: 240, height: 24)
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Select")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let escaped = NSRegularExpression.escapedPattern(for: input.stringValue)
+            .replacingOccurrences(of: "\\*", with: ".*")
+            .replacingOccurrences(of: "\\?", with: ".")
+        guard let regex = try? NSRegularExpression(pattern: "^\(escaped)$", options: [.caseInsensitive]) else { return }
+        selectedEntryIDs = Set(visibleEntries.filter {
+            regex.firstMatch(in: $0.name, range: NSRange($0.name.startIndex..., in: $0.name)) != nil
+        }.map(\.id))
+    }
+
+    func clearHistory() { backStack.removeAll(); forwardStack.removeAll() }
+
+    func connectToServer(_ address: String) {
+        let value = address.contains("://") ? address : "smb://\(address)"
+        guard let url = URL(string: value), ["smb", "afp", "ftp", "https", "http"].contains(url.scheme?.lowercased() ?? "") else {
+            operationError = "Enter a valid server address, such as smb://server/share."
+            return
+        }
+        guard NSWorkspace.shared.open(url) else { operationError = "macOS couldn’t open this server address."; return }
+    }
+
+    func requestConnectToServer() {
+        let alert = NSAlert()
+        alert.messageText = "Connect to Server"
+        alert.informativeText = "Enter a network address such as smb://server/share."
+        let input = NSTextField(string: "smb://")
+        input.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Connect")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { connectToServer(input.stringValue) }
+    }
+
+    var hasTrashItems: Bool {
+        let trashPath = URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".Trash").path
+        return (try? FileManager.default.contentsOfDirectory(atPath: trashPath).isEmpty) == false
+    }
+
+    func emptyTrash() {
+        let alert = NSAlert()
+        alert.alertStyle = .critical
+        alert.messageText = "Empty Trash?"
+        alert.informativeText = "Items in the Trash will be permanently deleted. This can’t be undone."
+        alert.addButton(withTitle: "Empty Trash")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let trash = URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".Trash")
+        do {
+            for name in try FileManager.default.contentsOfDirectory(atPath: trash.path) {
+                try FileManager.default.removeItem(at: trash.appending(path: name))
+            }
+        } catch { operationError = error.localizedDescription }
+    }
+
     func duplicateSelected() {
-        guard let selectedEntry else { return }
-        perform(["duplicate", selectedEntry.path])
+        let commands = selectedEntries.map { ["duplicate", $0.path] }
+        if !commands.isEmpty { performBatch(commands) }
     }
 
     func makeLinkSelected() {
-        guard let selectedEntry else { return }
-        let base = "\(selectedEntry.name) alias"
-        var name = base
-        var suffix = 2
-        while FileManager.default.fileExists(atPath: currentURL.appending(path: name).path) {
-            name = "\(base) \(suffix)"
-            suffix += 1
+        let commands = selectedEntries.map { entry -> [String] in
+            let base = "\(entry.name) alias"
+            var name = base
+            var suffix = 2
+            while FileManager.default.fileExists(atPath: currentURL.appending(path: name).path) {
+                name = "\(base) \(suffix)"
+                suffix += 1
+            }
+            return ["link", entry.path, currentURL.appending(path: name).path]
         }
-        perform(["link", selectedEntry.path, currentURL.appending(path: name).path])
+        if !commands.isEmpty { performBatch(commands) }
     }
 
     func chooseTransferDestination(move: Bool) {
@@ -342,7 +430,7 @@ final class BrowserModel {
     }
 
     func requestRename() {
-        guard let selectedEntry else { return }
+        guard selectedEntries.count == 1, let selectedEntry else { return }
         renameName = selectedEntry.name
         renamingPath = selectedEntry.path
     }
@@ -391,22 +479,23 @@ final class BrowserModel {
     }
 
     func moveSelectedToTrash() {
-        guard let selectedEntry else { return }
+        guard !selectedEntries.isEmpty else { return }
         do {
-            var resultingURL: NSURL?
-            try FileManager.default.trashItem(at: URL(fileURLWithPath: selectedEntry.path), resultingItemURL: &resultingURL)
-            self.selectedEntry = nil
+            for entry in selectedEntries {
+                var resultingURL: NSURL?
+                try FileManager.default.trashItem(at: URL(fileURLWithPath: entry.path), resultingItemURL: &resultingURL)
+            }
+            selectedEntryIDs.removeAll()
             refresh()
-        } catch {
-            operationError = error.localizedDescription
-        }
+        } catch { operationError = error.localizedDescription }
     }
 
     func copySelectedToClipboard(cut: Bool = false) {
-        guard let selectedEntry else { return }
+        let selection = selectedEntries
+        guard !selection.isEmpty else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects([URL(fileURLWithPath: selectedEntry.path) as NSURL])
+        pasteboard.writeObjects(selection.map { URL(fileURLWithPath: $0.path) as NSURL })
         if cut {
             pasteboard.setString("true", forType: NSPasteboard.PasteboardType("dev.maja.cut-files"))
         }
