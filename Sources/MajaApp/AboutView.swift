@@ -80,7 +80,7 @@ struct AboutView: View {
                 .padding(.bottom, 2)
 
             Text("Maja").font(.title2.weight(.semibold))
-            Text("0.1.1").foregroundStyle(.secondary)
+            Text("0.1.2").foregroundStyle(.secondary)
             Text("A native macOS file manager inspired by Caja.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)

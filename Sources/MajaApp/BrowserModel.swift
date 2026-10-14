@@ -46,8 +46,8 @@ final class BrowserModel {
     var newFolderName = ""
     var renameName = ""
     var renamingPath: String?
-    var iconScale: Double = UserDefaults.standard.object(forKey: "maja.iconScale") as? Double ?? 1 {
-        didSet { iconScale = min(1.8, max(0.65, iconScale)); UserDefaults.standard.set(iconScale, forKey: "maja.iconScale") }
+    var iconScale: Double = min(1.8, max(0.65, UserDefaults.standard.object(forKey: "maja.iconScale") as? Double ?? 1)) {
+        didSet { UserDefaults.standard.set(iconScale, forKey: "maja.iconScale") }
     }
     var isLoading = false
     var isSearching = false
@@ -148,6 +148,18 @@ final class BrowserModel {
         }
     }
 
+    func loadDirectoryEntries(at directory: URL) async throws -> [FileEntry] {
+        let directoryPath = directory.path
+        return try await Task.detached(priority: .userInitiated) {
+            let data = try Self.runCore(arguments: ["list", directoryPath])
+            let listing = try JSONDecoder().decode(DirectoryListing.self, from: data)
+            if let error = listing.error {
+                throw NSError(domain: "Maja", code: 1, userInfo: [NSLocalizedDescriptionKey: error])
+            }
+            return listing.entries
+        }.value
+    }
+
     func updateSearch(_ query: String) {
         searchTask?.cancel()
         guard !query.isEmpty else {
@@ -182,12 +194,20 @@ final class BrowserModel {
     }
 
     func open(_ entry: FileEntry) {
+        let url = URL(fileURLWithPath: entry.path)
+        if url.pathExtension.caseInsensitiveCompare("app") == .orderedSame {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { [weak self] _, error in
+                guard let error else { return }
+                Task { @MainActor in self?.operationError = error.localizedDescription }
+            }
+            return
+        }
         if entry.isDirectory {
             let now = Date()
             if let lastOpenedFolder, lastOpenedFolder.path == entry.path,
                now.timeIntervalSince(lastOpenedFolder.time) < 0.35 { return }
             lastOpenedFolder = (entry.path, now)
-            navigate(to: URL(fileURLWithPath: entry.path))
+            navigate(to: url)
         }
         else {
             let process = Process()
@@ -420,8 +440,8 @@ final class BrowserModel {
             ?? applicationURL.deletingPathExtension().lastPathComponent
     }
 
-    func zoomIn() { iconScale += 0.15 }
-    func zoomOut() { iconScale -= 0.15 }
+    func zoomIn() { iconScale = min(1.8, iconScale + 0.15) }
+    func zoomOut() { iconScale = max(0.65, iconScale - 0.15) }
     func resetZoom() { iconScale = 1 }
 
     func requestNewFolder() {

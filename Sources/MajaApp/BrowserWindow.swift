@@ -76,6 +76,12 @@ private struct BrowserTab: Identifiable {
     var title: String { model.currentURL.lastPathComponent.isEmpty ? "Macintosh HD" : model.currentURL.lastPathComponent }
 }
 
+private struct FileTreeRow: Identifiable {
+    let entry: FileEntry
+    let depth: Int
+    var id: String { entry.path }
+}
+
 private struct BrowserPane: View {
     @Bindable var model: BrowserModel
     let newTab: () -> Void
@@ -87,6 +93,9 @@ private struct BrowserPane: View {
     @State private var showLocationBar = true
     @State private var showStatusBar = true
     @State private var propertiesPath: String?
+    @State private var expandedFolderPaths: Set<String> = []
+    @State private var folderChildren: [String: [FileEntry]] = [:]
+    @State private var foldersLoading: Set<String> = []
     @FocusState private var locationFieldFocused: Bool
     @FocusState private var searchFieldFocused: Bool
 
@@ -218,6 +227,8 @@ private struct BrowserPane: View {
                     .disabled(!model.canGoForward).help("Forward")
                 Button { model.goUp() } label: { Image(systemName: "arrow.up") }.help("Enclosing Folder")
                 Button { model.navigate(to: FileManager.default.homeDirectoryForCurrentUser) } label: { Image(systemName: "house") }.help("Home")
+                Button { model.navigate(to: URL(fileURLWithPath: "/")) } label: { Image(systemName: "desktopcomputer") }
+                    .help("Computer")
                 Button { model.refresh() } label: { Image(systemName: "arrow.clockwise") }.help("Reload")
                 Divider().frame(height: 22)
                 Button { showSidebar.toggle() } label: { Image(systemName: "sidebar.left") }.help("Show or Hide Sidebar")
@@ -235,6 +246,16 @@ private struct BrowserPane: View {
                     Button("Add Bookmark") { model.addCurrentBookmark() }
                     Button("Paste") { model.pasteClipboard() }
                 } label: { Image(systemName: "ellipsis.circle") }.help("More")
+                Button { model.zoomOut() } label: { Image(systemName: "minus.magnifyingglass") }
+                    .disabled(model.iconScale <= 0.65).help("Zoom Out")
+                Button { model.resetZoom() } label: {
+                    Text("\(Int(model.iconScale * 100))%")
+                        .monospacedDigit()
+                        .frame(minWidth: 38)
+                }
+                .help("Reset Zoom")
+                Button { model.zoomIn() } label: { Image(systemName: "plus.magnifyingglass") }
+                    .disabled(model.iconScale >= 1.8).help("Zoom In")
                 Picker("View", selection: $model.viewMode) {
                     ForEach(ViewMode.allCases) { mode in
                         Label(mode.rawValue, systemImage: mode.symbol).tag(mode)
@@ -339,52 +360,147 @@ private struct BrowserPane: View {
     }
 
     private var listView: some View {
-        Table(model.visibleEntries, selection: Binding(
-            get: { model.selectedEntryIDs },
-            set: { model.selectedEntryIDs = $0 }
-        )) {
-            TableColumn("Name") { entry in
-                HStack(spacing: 8) {
-                    FileIcon(path: entry.path, size: 18, isFolder: entry.isDirectory)
-                    if model.renamingPath == entry.path {
-                        InlineRenameField(model: model)
-                    } else {
-                        Text(entry.name)
-                            .lineLimit(1)
-                            .onTapGesture(count: 2) { model.open(entry) }
-                            .simultaneousGesture(TapGesture().onEnded {
-                                model.select(entry, extend: NSEvent.modifierFlags.contains(.command))
-                            })
+        GeometryReader { geometry in
+            let sizeWidth: CGFloat = 110
+            let typeWidth: CGFloat = 150
+            let modifiedWidth: CGFloat = 190
+            let nameWidth = max(220, geometry.size.width - sizeWidth - typeWidth - modifiedWidth - 24)
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    Text("Name").frame(width: nameWidth, alignment: .leading)
+                    Text("Size").frame(width: sizeWidth, alignment: .leading)
+                    Text("Type").frame(width: typeWidth, alignment: .leading)
+                    Text("Date Modified").frame(width: modifiedWidth, alignment: .leading)
+                }
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .background(Color(nsColor: .windowBackgroundColor))
+                Divider()
+
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(treeRows) { row in
+                            detailsRow(row, nameWidth: nameWidth, sizeWidth: sizeWidth,
+                                       typeWidth: typeWidth, modifiedWidth: modifiedWidth)
+                        }
                     }
                 }
-                .draggable(URL(fileURLWithPath: entry.path))
-                .dropDestination(for: URL.self) { urls, _ in model.acceptDrop(urls, on: entry) }
             }
-            .width(min: 180, ideal: 300)
-            TableColumn("Size") { entry in
-                Text(entry.isDirectory ? "—" : ByteCountFormatter.string(fromByteCount: Int64(entry.size), countStyle: .file))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        model.select(entry, extend: NSEvent.modifierFlags.contains(.command))
-                    })
-            }
-                .width(min: 70, ideal: 90)
-            TableColumn("Modified") { entry in
-                Text(Date(timeIntervalSince1970: TimeInterval(entry.modified)), format: .dateTime.month(.abbreviated).day().hour().minute())
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        model.select(entry, extend: NSEvent.modifierFlags.contains(.command))
-                    })
-            }.width(min: 130, ideal: 150)
         }
-        .contextMenu(forSelectionType: String.self) { ids in
-            if let entry = model.visibleEntries.first(where: { ids.contains($0.id) }) {
-                entryContextMenu(entry)
+    }
+
+    private var treeRows: [FileTreeRow] {
+        var result: [FileTreeRow] = []
+        func append(_ entries: [FileEntry], depth: Int) {
+            for entry in entries {
+                result.append(FileTreeRow(entry: entry, depth: depth))
+                if expandedFolderPaths.contains(entry.path), let children = folderChildren[entry.path] {
+                    append(sortedTreeEntries(children), depth: depth + 1)
+                }
             }
-        } primaryAction: { ids in
-            if let entry = model.visibleEntries.first(where: { ids.contains($0.id) }) { model.open(entry) }
+        }
+        append(model.visibleEntries, depth: 0)
+        return result
+    }
+
+    private func sortedTreeEntries(_ entries: [FileEntry]) -> [FileEntry] {
+        entries.sorted { lhs, rhs in
+            if lhs.isDirectory != rhs.isDirectory { return lhs.isDirectory }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
+    }
+
+    private func detailsRow(_ row: FileTreeRow, nameWidth: CGFloat, sizeWidth: CGFloat,
+                            typeWidth: CGFloat, modifiedWidth: CGFloat) -> some View {
+        let entry = row.entry
+        return HStack(spacing: 0) {
+            HStack(spacing: 6) {
+                if entry.isDirectory {
+                    Button { toggleFolder(entry) } label: {
+                        Group {
+                            if foldersLoading.contains(entry.path) {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(systemName: expandedFolderPaths.contains(entry.path) ? "chevron.down" : "chevron.right")
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
+                        }
+                        .frame(width: 16, height: 22)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(expandedFolderPaths.contains(entry.path) ? "Collapse Folder" : "Expand Folder")
+                } else {
+                    Color.clear.frame(width: 16, height: 22)
+                }
+                FileIcon(path: entry.path, size: 18, isFolder: entry.isDirectory)
+                    .onTapGesture(count: 2) { model.open(entry) }
+                if model.renamingPath == entry.path {
+                    InlineRenameField(model: model)
+                } else {
+                    Text(entry.name)
+                        .lineLimit(1)
+                        .onTapGesture(count: 2) { model.open(entry) }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, CGFloat(row.depth) * 20)
+            .frame(width: nameWidth, alignment: .leading)
+
+            Text(detailsSize(entry)).foregroundStyle(.secondary)
+                .frame(width: sizeWidth, alignment: .leading)
+            Text(detailsType(entry)).foregroundStyle(.secondary)
+                .frame(width: typeWidth, alignment: .leading)
+            Text(Date(timeIntervalSince1970: TimeInterval(entry.modified)),
+                 format: .dateTime.month(.abbreviated).day().hour().minute())
+                .foregroundStyle(.secondary)
+                .frame(width: modifiedWidth, alignment: .leading)
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .frame(height: 34)
+        .background(model.selectedEntryIDs.contains(entry.id) ? Color.accentColor.opacity(0.18) : .clear)
+        .contentShape(Rectangle())
+        .onTapGesture { model.select(entry, extend: NSEvent.modifierFlags.contains(.command)) }
+        .draggable(URL(fileURLWithPath: entry.path))
+        .dropDestination(for: URL.self) { urls, _ in model.acceptDrop(urls, on: entry) }
+        .contextMenu { entryContextMenu(entry) }
+    }
+
+    private func detailsSize(_ entry: FileEntry) -> String {
+        if entry.isDirectory {
+            if let children = folderChildren[entry.path] {
+                return "\(children.count) item\(children.count == 1 ? "" : "s")"
+            }
+            return "—"
+        }
+        return ByteCountFormatter.string(fromByteCount: Int64(entry.size), countStyle: .file)
+    }
+
+    private func detailsType(_ entry: FileEntry) -> String {
+        if entry.isDirectory { return "Folder" }
+        guard !URL(fileURLWithPath: entry.name).pathExtension.isEmpty else { return "Document" }
+        return UTType(filenameExtension: URL(fileURLWithPath: entry.name).pathExtension)?.localizedDescription ?? "Document"
+    }
+
+    private func toggleFolder(_ entry: FileEntry) {
+        if expandedFolderPaths.contains(entry.path) {
+            expandedFolderPaths.remove(entry.path)
+            return
+        }
+        expandedFolderPaths.insert(entry.path)
+        guard folderChildren[entry.path] == nil else { return }
+        foldersLoading.insert(entry.path)
+        Task {
+            do {
+                folderChildren[entry.path] = try await model.loadDirectoryEntries(at: URL(fileURLWithPath: entry.path))
+            } catch {
+                expandedFolderPaths.remove(entry.path)
+                model.operationError = error.localizedDescription
+            }
+            foldersLoading.remove(entry.path)
         }
     }
 
